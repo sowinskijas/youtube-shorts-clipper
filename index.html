@@ -182,154 +182,7 @@ main{max-width:680px;margin:0 auto;padding:40px 20px 80px;display:flex;flex-dire
 </main>
 
 <script type="module">
-// ── ffmpeg.wasm ──────────────────────────────────────────────────────────────
-let ffmpeg = null;
-
-async function loadFFmpeg(onProgress) {
-  if (ffmpeg) return ffmpeg;
-  const { FFmpeg } = await import('https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/esm/index.js');
-  const { toBlobURL } = await import('https://unpkg.com/@ffmpeg/util@0.12.1/dist/esm/index.js');
-  ffmpeg = new FFmpeg();
-  ffmpeg.on('progress', ({ progress }) => onProgress(Math.round(progress * 100)));
-  const base = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
-  setDetail('Downloading video engine (~30 MB, one-time)…');
-  await ffmpeg.load({
-    coreURL:  await toBlobURL(`${base}/ffmpeg-core.js`,   'text/javascript'),
-    wasmURL:  await toBlobURL(`${base}/ffmpeg-core.wasm`, 'application/wasm'),
-  });
-  return ffmpeg;
-}
-
-// ── Audio analysis ───────────────────────────────────────────────────────────
-function findPeaks(arr, minDist, threshold) {
-  const peaks = [];
-  for (let i = 1; i < arr.length - 1; i++) {
-    if (arr[i] < threshold) continue;
-    if (arr[i] <= arr[i-1] || arr[i] <= arr[i+1]) continue;
-    if (peaks.length && i - peaks[peaks.length-1] < minDist) {
-      if (arr[i] > arr[peaks[peaks.length-1]]) peaks[peaks.length-1] = i;
-    } else peaks.push(i);
-  }
-  return peaks;
-}
-
-async function analyzeAudio(file, duration, maxClips, clipDuration) {
-  try {
-    setStep('audio'); setStatus('Analyzing audio…'); setPct(52);
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    const buf = await ctx.decodeAudioData(await file.arrayBuffer());
-    const data = buf.getChannelData(0);
-    const sr = buf.sampleRate;
-    const winSz = Math.floor(sr * 0.5);
-    const hopSz = Math.floor(sr * 0.25);
-    const energies = [], times = [];
-    for (let i = 0; i < data.length - winSz; i += hopSz) {
-      let s = 0;
-      for (let j = 0; j < winSz; j++) s += data[i+j] ** 2;
-      energies.push(Math.sqrt(s / winSz));
-      times.push(i / sr);
-    }
-    const k = Math.min(20, Math.floor(energies.length / 4) || 1);
-    const smoothed = energies.map((_, i) => {
-      const sl = energies.slice(Math.max(0,i-k), Math.min(energies.length,i+k));
-      return sl.reduce((a,b)=>a+b,0)/sl.length;
-    });
-    const mean = smoothed.reduce((a,b)=>a+b,0)/smoothed.length;
-    const std  = Math.sqrt(smoothed.reduce((a,b)=>a+(b-mean)**2,0)/smoothed.length);
-    const thresh = mean + 0.3 * std;
-    const minDist = Math.floor(clipDuration / 0.25);
-    const peaks = findPeaks(smoothed, minDist, thresh)
-      .sort((a,b) => smoothed[b] - smoothed[a]);
-    const leadIn = 5, used = [];
-    for (const p of peaks) {
-      let start = Math.max(0, times[p] - leadIn);
-      if (start + clipDuration > duration) start = Math.max(0, duration - clipDuration);
-      if (!used.some(s => Math.abs(start-s) < clipDuration*0.75)) used.push(start);
-      if (used.length >= maxClips) break;
-    }
-    return used.length ? used.sort((a,b)=>a-b) : null;
-  } catch { return null; }
-}
-
-function evenSpacing(duration, maxClips, clipDuration) {
-  const step = duration / (maxClips + 1);
-  return Array.from({length: maxClips}, (_,i) => step*(i+1))
-    .filter(t => t + clipDuration <= duration);
-}
-
-// ── Clip generation ──────────────────────────────────────────────────────────
-async function generateClips(file, timestamps, clipDuration, onClip) {
-  const ff = ffmpeg;
-  // Write source file to ffmpeg FS
-  setDetail('Writing video to memory…');
-  const src = new Uint8Array(await file.arrayBuffer());
-  await ff.writeFile('input.mp4', src);
-
-  // Get video dimensions via HTML video element
-  const { w, h, dur } = await getVideoInfo(file);
-
-  // Crop params (16:9 → 9:16 center crop)
-  const targetRatio = 9/16;
-  let cropW, cropH, cropX, cropY;
-  if (w/h > targetRatio) {
-    cropH = h; cropW = Math.floor(h * targetRatio) & ~1;
-    cropX = Math.floor((w - cropW) / 2); cropY = 0;
-  } else {
-    cropW = w; cropH = Math.floor(w / targetRatio) & ~1;
-    cropX = 0; cropY = Math.floor((h - cropH) / 2);
-  }
-
-  const clips = [];
-  for (let i = 0; i < timestamps.length; i++) {
-    const ts = timestamps[i];
-    const outName = `clip_${String(i+1).padStart(3,'0')}.mp4`;
-    setStep('clip');
-    setStatus(`Creating clip ${i+1} of ${timestamps.length}…`);
-    setPct(65 + (i / timestamps.length) * 32);
-    setDetail(`@ ${fmtTime(ts)}`);
-
-    await ff.exec([
-      '-ss', String(ts),
-      '-i', 'input.mp4',
-      '-t', String(clipDuration),
-      '-vf', `crop=${cropW}:${cropH}:${cropX}:${cropY},scale=1080:1920`,
-      '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '26',
-      '-c:a', 'aac', '-b:a', '128k',
-      '-movflags', '+faststart',
-      '-y', outName
-    ]);
-
-    const data = await ff.readFile(outName);
-    const blob = new Blob([data.buffer], {type:'video/mp4'});
-    clips.push({ blob, ts, index: i+1 });
-    onClip(clips.length, timestamps.length);
-    await ff.deleteFile(outName);
-  }
-  await ff.deleteFile('input.mp4');
-  return clips;
-}
-
-function getVideoInfo(file) {
-  return new Promise((resolve, reject) => {
-    const v = document.createElement('video');
-    v.preload = 'metadata';
-    v.src = URL.createObjectURL(file);
-    v.onloadedmetadata = () => {
-      resolve({ w: v.videoWidth, h: v.videoHeight, dur: v.duration });
-      URL.revokeObjectURL(v.src);
-    };
-    v.onerror = reject;
-  });
-}
-
-function fmtTime(s) {
-  const h=Math.floor(s/3600), m=Math.floor((s%3600)/60), sec=Math.floor(s%60);
-  if (h) return `${h}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
-  return `${m}:${String(sec).padStart(2,'0')}`;
-}
-
-// ── UI helpers ───────────────────────────────────────────────────────────────
-const $  = id => document.getElementById(id);
+const $ = id => document.getElementById(id);
 const setStep   = s => { $('step-badge').textContent = s; };
 const setStatus = s => { $('progress-status').textContent = s; };
 const setDetail = s => { $('progress-detail').textContent = s; };
@@ -340,98 +193,222 @@ const showErr   = msg => {
   $('progress-card').classList.add('hidden');
 };
 
+// ── Tabs ─────────────────────────────────────────────────────────────────────
+let activeTab = 'url';
+$('tab-url').addEventListener('click',  () => switchTab('url'));
+$('tab-file').addEventListener('click', () => switchTab('file'));
+function switchTab(t) {
+  activeTab = t;
+  ['url','file'].forEach(id => {
+    $(`tab-${id}`).classList.toggle('active', id===t);
+    $(`panel-${id}`).classList.toggle('active', id===t);
+  });
+}
+
 // ── File handling ─────────────────────────────────────────────────────────────
 let selectedFile = null;
-let generatedClips = [];
-
 function setFile(f) {
   if (!f || !f.type.startsWith('video/')) { alert('Please select a video file.'); return; }
   selectedFile = f;
   $('drop-zone').classList.add('hidden');
   $('file-selected').classList.remove('hidden');
   $('fname').textContent = f.name;
-  $('fsize').textContent = (f.size / 1024 / 1024).toFixed(1) + ' MB';
-  $('process-btn').disabled = false;
-  $('process-btn').textContent = 'Generate Clips';
+  $('fsize').textContent = (f.size/1024/1024).toFixed(1)+' MB';
 }
-
 $('file-input').addEventListener('change', e => setFile(e.target.files[0]));
 $('fclear').addEventListener('click', () => {
-  selectedFile = null;
-  $('file-input').value = '';
+  selectedFile = null; $('file-input').value = '';
   $('file-selected').classList.add('hidden');
   $('drop-zone').classList.remove('hidden');
-  $('process-btn').disabled = true;
-  $('process-btn').textContent = 'Select a video first';
 });
-
 const dz = $('drop-zone');
-dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag-over'); });
+dz.addEventListener('dragover',  e => { e.preventDefault(); dz.classList.add('drag-over'); });
 dz.addEventListener('dragleave', () => dz.classList.remove('drag-over'));
 dz.addEventListener('drop', e => { e.preventDefault(); dz.classList.remove('drag-over'); setFile(e.dataTransfer.files[0]); });
 dz.addEventListener('click', () => $('file-input').click());
 
-// ── Main process ─────────────────────────────────────────────────────────────
+// ── ffmpeg.wasm ───────────────────────────────────────────────────────────────
+let ffmpeg = null;
+async function loadFFmpeg() {
+  if (ffmpeg) return;
+  const { FFmpeg }    = await import('https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/esm/index.js');
+  const { toBlobURL } = await import('https://unpkg.com/@ffmpeg/util@0.12.1/dist/esm/index.js');
+  ffmpeg = new FFmpeg();
+  const base = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
+  setDetail('Downloading video engine (~30 MB, one-time)…');
+  await ffmpeg.load({
+    coreURL:  await toBlobURL(`${base}/ffmpeg-core.js`,   'text/javascript'),
+    wasmURL:  await toBlobURL(`${base}/ffmpeg-core.wasm`, 'application/wasm'),
+  });
+}
+
+// ── cobalt.tools download ─────────────────────────────────────────────────────
+async function fetchVideoFromURL(url) {
+  setStep('Download'); setStatus('Fetching video link…'); setDetail(''); setPct(8);
+  const res = await fetch('https://api.cobalt.tools/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+    body: JSON.stringify({ url, videoQuality: '720', filenameStyle: 'basic', alwaysProxy: true })
+  });
+  if (!res.ok) throw new Error(`cobalt.tools returned ${res.status}. The URL may be unsupported or private.`);
+  const data = await res.json();
+  if (data.status === 'error') throw new Error(data.error?.code || 'Could not get video. Try a different URL.');
+  if (data.status === 'picker') throw new Error('This URL has multiple videos. Paste a direct video link.');
+
+  const videoURL = data.url;
+  setStatus('Downloading video…'); setDetail(videoURL.slice(0,60)+'…'); setPct(12);
+
+  // Stream download with progress
+  const dlRes = await fetch(videoURL);
+  if (!dlRes.ok) throw new Error('Video download failed. The link may have expired — try again.');
+  const total = parseInt(dlRes.headers.get('content-length') || '0');
+  const reader = dlRes.body.getReader();
+  const chunks = [];
+  let received = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    received += value.length;
+    if (total) { setPct(12 + (received/total)*28); setDetail(`${(received/1024/1024).toFixed(1)} / ${(total/1024/1024).toFixed(1)} MB`); }
+    else        { setDetail(`${(received/1024/1024).toFixed(1)} MB downloaded…`); }
+  }
+  const blob = new Blob(chunks, { type: dlRes.headers.get('content-type') || 'video/mp4' });
+  return new File([blob], 'video.mp4', { type: blob.type });
+}
+
+// ── Audio analysis ────────────────────────────────────────────────────────────
+function findPeaks(arr, minDist, threshold) {
+  const peaks = [];
+  for (let i=1; i<arr.length-1; i++) {
+    if (arr[i]<threshold) continue;
+    if (arr[i]<=arr[i-1]||arr[i]<=arr[i+1]) continue;
+    if (peaks.length && i-peaks[peaks.length-1]<minDist) { if(arr[i]>arr[peaks[peaks.length-1]])peaks[peaks.length-1]=i; }
+    else peaks.push(i);
+  }
+  return peaks;
+}
+async function analyzeAudio(file, duration, maxClips, clipDuration) {
+  try {
+    setStep('Analyze'); setStatus('Analyzing audio for exciting moments…'); setPct(45);
+    const ctx = new (window.AudioContext||window.webkitAudioContext)();
+    const buf = await ctx.decodeAudioData(await file.arrayBuffer());
+    const data = buf.getChannelData(0), sr = buf.sampleRate;
+    const winSz=Math.floor(sr*0.5), hopSz=Math.floor(sr*0.25);
+    const energies=[], times=[];
+    for (let i=0; i<data.length-winSz; i+=hopSz) {
+      let s=0; for(let j=0;j<winSz;j++) s+=data[i+j]**2;
+      energies.push(Math.sqrt(s/winSz)); times.push(i/sr);
+    }
+    const k=Math.min(20,Math.floor(energies.length/4)||1);
+    const smoothed=energies.map((_,i)=>{const sl=energies.slice(Math.max(0,i-k),Math.min(energies.length,i+k));return sl.reduce((a,b)=>a+b,0)/sl.length;});
+    const mean=smoothed.reduce((a,b)=>a+b,0)/smoothed.length;
+    const std=Math.sqrt(smoothed.reduce((a,b)=>a+(b-mean)**2,0)/smoothed.length);
+    const thresh=mean+0.3*std, minDist=Math.floor(clipDuration/0.25);
+    const peaks=findPeaks(smoothed,minDist,thresh).sort((a,b)=>smoothed[b]-smoothed[a]);
+    const leadIn=5, used=[];
+    for (const p of peaks) {
+      let start=Math.max(0,times[p]-leadIn);
+      if(start+clipDuration>duration) start=Math.max(0,duration-clipDuration);
+      if(!used.some(s=>Math.abs(start-s)<clipDuration*0.75)) used.push(start);
+      if(used.length>=maxClips) break;
+    }
+    return used.length ? used.sort((a,b)=>a-b) : null;
+  } catch { return null; }
+}
+function evenSpacing(duration, maxClips, clipDuration) {
+  const step=duration/(maxClips+1);
+  return Array.from({length:maxClips},(_,i)=>step*(i+1)).filter(t=>t+clipDuration<=duration);
+}
+
+// ── Clip generation ───────────────────────────────────────────────────────────
+function getVideoInfo(file) {
+  return new Promise((res,rej)=>{
+    const v=document.createElement('video'); v.preload='metadata';
+    v.src=URL.createObjectURL(file);
+    v.onloadedmetadata=()=>{res({w:v.videoWidth,h:v.videoHeight,dur:v.duration});URL.revokeObjectURL(v.src);};
+    v.onerror=rej;
+  });
+}
+function fmtTime(s){const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sec=Math.floor(s%60);return h?`${h}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`:`${m}:${String(sec).padStart(2,'0')}`;}
+
+async function generateClips(file, timestamps, clipDuration) {
+  setStep('Load'); setStatus('Loading video engine…'); setPct(42);
+  await loadFFmpeg();
+  setDetail('Writing video to memory…'); setPct(48);
+  await ffmpeg.writeFile('input.mp4', new Uint8Array(await file.arrayBuffer()));
+  const {w, h} = await getVideoInfo(file);
+  const tr=9/16; let cropW,cropH,cropX,cropY;
+  if(w/h>tr){cropH=h;cropW=Math.floor(h*tr)&~1;cropX=Math.floor((w-cropW)/2);cropY=0;}
+  else{cropW=w;cropH=Math.floor(w/tr)&~1;cropX=0;cropY=Math.floor((h-cropH)/2);}
+  const clips=[];
+  for(let i=0;i<timestamps.length;i++){
+    const ts=timestamps[i], out=`clip_${String(i+1).padStart(3,'0')}.mp4`;
+    setStep('Clip'); setStatus(`Clip ${i+1} of ${timestamps.length}…`); setDetail(`@ ${fmtTime(ts)}`);
+    setPct(55+(i/timestamps.length)*42);
+    await ffmpeg.exec(['-ss',String(ts),'-i','input.mp4','-t',String(clipDuration),
+      '-vf',`crop=${cropW}:${cropH}:${cropX}:${cropY},scale=1080:1920`,
+      '-c:v','libx264','-preset','ultrafast','-crf','26',
+      '-c:a','aac','-b:a','128k','-movflags','+faststart','-y',out]);
+    const data=await ffmpeg.readFile(out);
+    clips.push({blob:new Blob([data.buffer],{type:'video/mp4'}),ts,index:i+1});
+    await ffmpeg.deleteFile(out);
+  }
+  await ffmpeg.deleteFile('input.mp4');
+  return clips;
+}
+
+// ── Main ──────────────────────────────────────────────────────────────────────
+let generatedClips = [];
+
 $('process-btn').addEventListener('click', async () => {
-  if (!selectedFile) return;
-  const maxClips     = Math.max(1, Math.min(20, +$('max-clips').value    || 8));
-  const clipDuration = Math.max(10, Math.min(59, +$('clip-duration').value || 30));
+  const maxClips     = Math.max(1,Math.min(20,+$('max-clips').value||8));
+  const clipDuration = Math.max(10,Math.min(59,+$('clip-duration').value||30));
 
   $('upload-card').classList.add('hidden');
   $('error-card').classList.add('hidden');
   $('results-card').classList.add('hidden');
   $('progress-card').classList.remove('hidden');
-  setPct(2); setStep('Loading'); setStatus('Loading video engine…'); setDetail('');
+  setPct(2); setStep('Start'); setStatus('Starting…'); setDetail('');
 
   try {
-    // Load ffmpeg
-    await loadFFmpeg(p => { setPct(2 + p*0.45); setDetail(`Downloading engine… ${p}%`); });
-    setPct(50); setStep('Analyze'); setStatus('Reading video…'); setDetail('');
+    let file;
+    if (activeTab === 'url') {
+      const url = $('url-input').value.trim();
+      if (!url) throw new Error('Please paste a YouTube or Twitch URL.');
+      file = await fetchVideoFromURL(url);
+    } else {
+      if (!selectedFile) throw new Error('Please select a video file.');
+      file = selectedFile;
+    }
 
-    // Get duration
-    const { dur } = await getVideoInfo(selectedFile);
-    if (!dur) throw new Error('Could not read video duration. Try a different file.');
+    const {dur} = await getVideoInfo(file);
+    if (!dur) throw new Error('Could not read video duration.');
     setDetail(`Duration: ${fmtTime(dur)}`);
 
-    // Audio analysis
-    let timestamps = await analyzeAudio(selectedFile, dur, maxClips, clipDuration);
-    if (!timestamps) {
-      setDetail('Audio analysis failed — using even spacing');
-      timestamps = evenSpacing(dur, maxClips, clipDuration);
-    }
+    let timestamps = await analyzeAudio(file, dur, maxClips, clipDuration);
+    if (!timestamps) { setDetail('Using even spacing (audio flat)'); timestamps = evenSpacing(dur, maxClips, clipDuration); }
     if (!timestamps.length) throw new Error('Video is too short for the selected clip duration.');
+    setStatus(`Found ${timestamps.length} moments to clip`); setPct(53);
 
-    setStatus(`Found ${timestamps.length} moments`);
-    setPct(65);
-
-    // Generate clips
-    generatedClips = await generateClips(selectedFile, timestamps, clipDuration, (done, total) => {
-      setPct(65 + (done/total)*32);
-    });
-
-    // Show results
+    generatedClips = await generateClips(file, timestamps, clipDuration);
     setPct(100); setStatus('Done!');
-    setTimeout(() => showResults(), 400);
-
+    setTimeout(showResults, 400);
   } catch(e) {
     showErr(e.message || String(e));
+    $('upload-card').classList.remove('hidden');
   }
 });
 
 function showResults() {
   $('progress-card').classList.add('hidden');
-  $('error-card').classList.add('hidden');
   $('results-card').classList.remove('hidden');
   $('results-summary').textContent = `${generatedClips.length} clip${generatedClips.length!==1?'s':''}`;
-
-  const grid = $('clips-grid');
-  grid.innerHTML = '';
+  const grid = $('clips-grid'); grid.innerHTML='';
   generatedClips.forEach(clip => {
-    const url = URL.createObjectURL(clip.blob);
-    const div = document.createElement('div');
-    div.className = 'clip-item';
-    div.innerHTML = `
-      <video src="${url}" controls playsinline muted loop preload="metadata"></video>
+    const url=URL.createObjectURL(clip.blob), div=document.createElement('div');
+    div.className='clip-item';
+    div.innerHTML=`<video src="${url}" controls playsinline muted loop preload="metadata"></video>
       <div class="clip-info">
         <span class="clip-label">Clip ${clip.index}</span>
         <span class="clip-time">@ ${fmtTime(clip.ts)}</span>
@@ -439,35 +416,23 @@ function showResults() {
       </div>`;
     grid.appendChild(div);
   });
-
-  grid.querySelectorAll('.clip-dl').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const c = generatedClips[+btn.dataset.idx];
-      const a = Object.assign(document.createElement('a'), {href: URL.createObjectURL(c.blob), download: `clip_${c.index}.mp4`});
-      a.click();
-    });
-  });
+  grid.querySelectorAll('.clip-dl').forEach(btn=>btn.addEventListener('click',()=>{
+    const c=generatedClips[+btn.dataset.idx];
+    Object.assign(document.createElement('a'),{href:URL.createObjectURL(c.blob),download:`clip_${c.index}.mp4`}).click();
+  }));
 }
 
-$('dl-all-btn').addEventListener('click', () => {
-  generatedClips.forEach((c,i) => setTimeout(() => {
-    const a = Object.assign(document.createElement('a'), {href: URL.createObjectURL(c.blob), download: `clip_${c.index}.mp4`});
-    a.click();
-  }, i*300));
-});
+$('dl-all-btn').addEventListener('click', ()=>
+  generatedClips.forEach((c,i)=>setTimeout(()=>
+    Object.assign(document.createElement('a'),{href:URL.createObjectURL(c.blob),download:`clip_${c.index}.mp4`}).click()
+  ,i*300))
+);
 
-$('start-over-btn').addEventListener('click', () => {
-  generatedClips = []; selectedFile = null;
-  $('file-input').value = '';
-  $('results-card').classList.add('hidden');
-  $('error-card').classList.add('hidden');
-  $('progress-card').classList.add('hidden');
-  $('file-selected').classList.add('hidden');
-  $('drop-zone').classList.remove('hidden');
-  $('upload-card').classList.remove('hidden');
-  $('process-btn').disabled = true;
-  $('process-btn').textContent = 'Select a video first';
-  setPct(0);
+$('start-over-btn').addEventListener('click', ()=>{
+  generatedClips=[]; selectedFile=null; $('file-input').value='';
+  ['results-card','error-card','progress-card'].forEach(id=>$(id).classList.add('hidden'));
+  $('file-selected').classList.add('hidden'); $('drop-zone').classList.remove('hidden');
+  $('upload-card').classList.remove('hidden'); $('url-input').value=''; setPct(0);
 });
 </script>
 </body>
