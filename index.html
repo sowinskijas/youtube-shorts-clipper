@@ -361,8 +361,18 @@ function getVideoInfo(file) {
   return new Promise((res,rej)=>{
     const v=document.createElement('video'); v.preload='metadata';
     v.src=URL.createObjectURL(file);
-    v.onloadedmetadata=()=>{res({w:v.videoWidth,h:v.videoHeight,dur:v.duration});URL.revokeObjectURL(v.src);};
+    let resolved=false;
+    const done=(dur)=>{ if(resolved)return; resolved=true; URL.revokeObjectURL(v.src); res({w:v.videoWidth||1280,h:v.videoHeight||720,dur}); };
+    v.onloadedmetadata=()=>{
+      if(isFinite(v.duration)&&v.duration>0){ done(v.duration); return; }
+      // MediaRecorder WebM: duration is Infinity — seek to end to force it
+      v.currentTime=1e9;
+    };
+    v.ontimeupdate=()=>{ if(!isFinite(v.duration)||v.duration<=0) return; done(v.duration); };
+    v.ondurationchange=()=>{ if(isFinite(v.duration)&&v.duration>0) done(v.duration); };
+    v.oncanplay=()=>{ if(isFinite(v.duration)&&v.duration>0) done(v.duration); };
     v.onerror=rej;
+    setTimeout(()=>{ if(!resolved){ if(v.duration&&isFinite(v.duration)) done(v.duration); else rej(new Error('Could not read video metadata.')); } },8000);
   });
 }
 function fmtTime(s){const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sec=Math.floor(s%60);return h?`${h}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`:`${m}:${String(sec).padStart(2,'0')}`;}
