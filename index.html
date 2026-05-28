@@ -450,7 +450,8 @@ $('process-btn').addEventListener('click', async () => {
     setPct(100); setStatus('Done!');
     setTimeout(showResults, 400);
   } catch(e) {
-    showErr(e.message || String(e));
+    if (e.message !== '__SHOW_HELPER__') showErr(e.message || String(e));
+    $('progress-card').classList.add('hidden');
     $('upload-card').classList.remove('hidden');
   }
 });
