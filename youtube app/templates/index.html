@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Shorts Clipper</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+
+  <div class="disclaimer">
+    <span class="disc-icon">⚠️</span>
+    <span><strong>Copyright notice:</strong> Only clip content you have the right to use. Streams often contain copyrighted music or game footage — YouTube's Content ID can flag or remove your Shorts. Use responsibly.</span>
+  </div>
+
+  <main>
+    <div class="hero">
+      <h1>🎬 Shorts Clipper</h1>
+      <p class="sub">Paste a YouTube or Twitch VOD → get portrait clips ready to post</p>
+    </div>
+
+    <!-- Input form -->
+    <div class="card" id="form-card">
+      <form id="clip-form" autocomplete="off">
+
+        <div class="field">
+          <label for="url">Video URL</label>
+          <input id="url" type="url" placeholder="https://www.youtube.com/watch?v=…  or  https://www.twitch.tv/videos/…" required />
+        </div>
+
+        <div class="row two">
+          <div class="field">
+            <label for="max-clips">Number of clips</label>
+            <input id="max-clips" type="number" value="8" min="1" max="20" />
+          </div>
+          <div class="field">
+            <label for="clip-duration">Clip length <span class="muted">(seconds)</span></label>
+            <input id="clip-duration" type="number" value="30" min="10" max="59" />
+          </div>
+        </div>
+
+        <details class="advanced">
+          <summary>Advanced: limit time range <span class="muted">(optional)</span></summary>
+          <div class="row two" style="margin-top:12px">
+            <div class="field">
+              <label for="start-time">Start time</label>
+              <input id="start-time" type="text" placeholder="e.g. 00:30:00" />
+            </div>
+            <div class="field">
+              <label for="end-time">End time</label>
+              <input id="end-time" type="text" placeholder="e.g. 01:30:00" />
+            </div>
+          </div>
+        </details>
+
+        <button type="submit" id="submit-btn">
+          <span id="btn-label">Generate Clips</span>
+        </button>
+      </form>
+    </div>
+
+    <!-- Progress -->
+    <div class="card hidden" id="progress-card">
+      <div class="progress-header">
+        <span id="progress-step-badge" class="badge">Starting</span>
+        <span id="progress-status">Initializing…</span>
+      </div>
+      <div class="progress-track">
+        <div class="progress-fill" id="progress-fill"></div>
+      </div>
+      <div id="progress-detail" class="progress-detail"></div>
+    </div>
+
+    <!-- Error -->
+    <div class="card error-card hidden" id="error-card">
+      <div class="error-icon">✖</div>
+      <div>
+        <strong>Something went wrong</strong>
+        <p id="error-msg"></p>
+      </div>
+    </div>
+
+    <!-- Results -->
+    <div class="card hidden" id="results-card">
+      <div class="results-header">
+        <h2>Your Clips</h2>
+        <span id="results-summary" class="badge success"></span>
+      </div>
+      <div id="clips-grid"></div>
+      <div class="results-actions">
+        <button class="btn-dl-all" id="dl-all-btn">Download All Clips</button>
+        <button class="btn-secondary" id="start-over-btn">Start Over</button>
+      </div>
+    </div>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
