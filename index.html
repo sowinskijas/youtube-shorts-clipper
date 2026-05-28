@@ -97,30 +97,44 @@ main{max-width:680px;margin:0 auto;padding:40px 20px 80px;display:flex;flex-dire
 <main>
   <div class="hero">
     <h1>🎬 Shorts Clipper</h1>
-    <p class="sub">Upload a VOD → get portrait clips ready to post as Shorts</p>
+    <p class="sub">Paste a streamer link → get portrait clips ready for YouTube Shorts</p>
   </div>
 
-  <div class="note">
-    <strong>How it works:</strong> Download your streamer VOD using
-    <a href="https://cobalt.tools" target="_blank" style="color:var(--accent)">cobalt.tools</a>
-    or <code style="background:var(--surface2);padding:1px 5px;border-radius:3px">yt-dlp</code>,
-    then upload it here. Everything runs in your browser — no servers, no uploads to the cloud.
-  </div>
-
-  <!-- Upload card -->
+  <!-- Input card -->
   <div class="card" id="upload-card">
-    <div class="drop-zone" id="drop-zone">
-      <div class="drop-icon">🎥</div>
-      <p>Drag &amp; drop your video here</p>
-      <p>or</p>
-      <label class="btn-upload" for="file-input">Choose File</label>
-      <input type="file" id="file-input" accept="video/*" hidden/>
+
+    <!-- Tabs -->
+    <div class="tabs">
+      <button class="tab-btn active" id="tab-url">🔗 Paste URL</button>
+      <button class="tab-btn"        id="tab-file">📁 Upload File</button>
     </div>
 
-    <div id="file-selected" class="file-selected hidden">
-      <span class="fname" id="fname"></span>
-      <span class="fsize" id="fsize"></span>
-      <button class="fclear" id="fclear" title="Remove">✕</button>
+    <!-- URL panel -->
+    <div class="tab-panel active" id="panel-url">
+      <div class="field">
+        <label>YouTube or Twitch URL</label>
+        <input class="url-input" id="url-input" type="url"
+          placeholder="https://www.youtube.com/watch?v=…  or  https://www.twitch.tv/videos/…"/>
+      </div>
+      <p style="font-size:12px;color:var(--muted);margin-top:8px">
+        Video is downloaded via <a href="https://cobalt.tools" target="_blank" style="color:var(--accent)">cobalt.tools</a> — free &amp; no account needed. Works best under 30 min.
+      </p>
+    </div>
+
+    <!-- File panel -->
+    <div class="tab-panel" id="panel-file">
+      <div class="drop-zone" id="drop-zone">
+        <div class="drop-icon">🎥</div>
+        <p>Drag &amp; drop your video here</p>
+        <p>or</p>
+        <label class="btn-upload" for="file-input">Choose File</label>
+        <input type="file" id="file-input" accept="video/*" hidden/>
+      </div>
+      <div id="file-selected" class="file-selected hidden">
+        <span class="fname" id="fname"></span>
+        <span class="fsize" id="fsize"></span>
+        <button class="fclear" id="fclear" title="Remove">✕</button>
+      </div>
     </div>
 
     <div class="row">
@@ -134,7 +148,7 @@ main{max-width:680px;margin:0 auto;padding:40px 20px 80px;display:flex;flex-dire
       </div>
     </div>
 
-    <button id="process-btn" disabled>Select a video first</button>
+    <button id="process-btn">Generate Clips</button>
   </div>
 
   <!-- Progress -->
