@@ -252,39 +252,64 @@ async function loadFFmpeg() {
   });
 }
 
-// ── cobalt.tools download ─────────────────────────────────────────────────────
+// ── video download ────────────────────────────────────────────────────────────
+function showCobaltHelper(url) {
+  $('url-hint').classList.add('hidden');
+  $('cobalt-link').href = 'https://cobalt.tools/';
+  $('url-helper').classList.remove('hidden');
+  // Copy URL to clipboard so user can paste on cobalt.tools
+  navigator.clipboard?.writeText(url).catch(()=>{});
+  // Open cobalt.tools in new tab
+  window.open('https://cobalt.tools/', '_blank');
+  // Switch to upload tab after a moment
+  setTimeout(() => switchTab('file'), 1200);
+}
+
 async function fetchVideoFromURL(url) {
-  setStep('Download'); setStatus('Fetching video link…'); setDetail(''); setPct(8);
-  const res = await fetch('https://api.cobalt.tools/', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-    body: JSON.stringify({ url, videoQuality: '720', filenameStyle: 'basic', alwaysProxy: true })
-  });
-  if (!res.ok) throw new Error(`cobalt.tools returned ${res.status}. The URL may be unsupported or private.`);
-  const data = await res.json();
-  if (data.status === 'error') throw new Error(data.error?.code || 'Could not get video. Try a different URL.');
-  if (data.status === 'picker') throw new Error('This URL has multiple videos. Paste a direct video link.');
+  setStep('Download'); setStatus('Fetching video…'); setDetail(''); setPct(8);
 
-  const videoURL = data.url;
-  setStatus('Downloading video…'); setDetail(videoURL.slice(0,60)+'…'); setPct(12);
+  // Try cobalt.tools API
+  try {
+    const res = await fetch('https://api.cobalt.tools/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify({ url, videoQuality: '720', filenameStyle: 'basic', alwaysProxy: true })
+    });
+    const data = await res.json();
 
-  // Stream download with progress
-  const dlRes = await fetch(videoURL);
-  if (!dlRes.ok) throw new Error('Video download failed. The link may have expired — try again.');
-  const total = parseInt(dlRes.headers.get('content-length') || '0');
-  const reader = dlRes.body.getReader();
-  const chunks = [];
-  let received = 0;
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    chunks.push(value);
-    received += value.length;
-    if (total) { setPct(12 + (received/total)*28); setDetail(`${(received/1024/1024).toFixed(1)} / ${(total/1024/1024).toFixed(1)} MB`); }
-    else        { setDetail(`${(received/1024/1024).toFixed(1)} MB downloaded…`); }
+    if (data.status === 'error' && data.error?.code?.includes('auth')) {
+      // API now requires auth — guide user to web UI instead
+      throw new Error('__COBALT_AUTH__');
+    }
+    if (!res.ok || data.status === 'error') throw new Error(data.error?.code || `HTTP ${res.status}`);
+    if (data.status === 'picker') throw new Error('This URL has multiple videos. Paste a direct video link.');
+
+    const videoURL = data.url;
+    setStatus('Downloading video…'); setDetail(''); setPct(12);
+    const dlRes = await fetch(videoURL);
+    if (!dlRes.ok) throw new Error('Download failed — try again.');
+    const total = parseInt(dlRes.headers.get('content-length') || '0');
+    const reader = dlRes.body.getReader();
+    const chunks = [];
+    let received = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      received += value.length;
+      if (total) { setPct(12 + (received/total)*28); setDetail(`${(received/1024/1024).toFixed(1)} / ${(total/1024/1024).toFixed(1)} MB`); }
+      else { setDetail(`${(received/1024/1024).toFixed(1)} MB…`); }
+    }
+    const blob = new Blob(chunks, { type: dlRes.headers.get('content-type') || 'video/mp4' });
+    return new File([blob], 'video.mp4', { type: blob.type });
+
+  } catch(e) {
+    if (e.message === '__COBALT_AUTH__' || e.message?.includes('auth') || e.message?.includes('jwt')) {
+      showCobaltHelper(url);
+      throw new Error('YouTube requires a download step first.\n\ncobalt.tools just opened in a new tab — paste your link there, download the video, then come back and upload it using the Upload File tab.');
+    }
+    throw e;
   }
-  const blob = new Blob(chunks, { type: dlRes.headers.get('content-type') || 'video/mp4' });
-  return new File([blob], 'video.mp4', { type: blob.type });
 }
 
 // ── Audio analysis ────────────────────────────────────────────────────────────
