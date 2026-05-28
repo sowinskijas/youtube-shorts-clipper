@@ -72,5 +72,6 @@ def serve_clip(filename):
 
 
 if __name__ == '__main__':
-    print('\n  Shorts Clipper running → http://localhost:5050\n')
-    app.run(debug=False, port=5050, threaded=True)
+    port = int(os.environ.get('PORT', 5050))
+    print(f'\n  Shorts Clipper running → http://localhost:{port}\n')
+    app.run(host='0.0.0.0', debug=False, port=port, threaded=True)
