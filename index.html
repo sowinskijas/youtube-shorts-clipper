@@ -253,50 +253,61 @@ async function loadFFmpeg() {
 }
 
 // ── video download ────────────────────────────────────────────────────────────
-function showCobaltHelper(url) {
+function showDownloadHelper(url) {
   $('url-hint').classList.add('hidden');
-  $('cobalt-link').href = 'https://cobalt.tools/';
-  $('url-helper').classList.remove('hidden');
-  // Copy URL to clipboard so user can paste on cobalt.tools
+  $('cobalt-link').href = `https://cobalt.tools/`;
+  // Copy URL so user can paste it into cobalt.tools easily
   navigator.clipboard?.writeText(url).catch(()=>{});
-  // Open cobalt.tools in new tab
-  window.open('https://cobalt.tools/', '_blank');
-  // Switch to upload tab after a moment
-  setTimeout(() => switchTab('file'), 1200);
+  $('url-helper').classList.remove('hidden');
 }
 
 async function fetchVideoFromURL(url) {
-  setStep('Download'); setStatus('Fetching video…'); setDetail(''); setPct(8);
+  setStep('Download'); setStatus('Fetching video…'); setDetail('Connecting…'); setPct(5);
 
-  // Try cobalt.tools API
+  // Step 1: try to get a guest session token
+  let jwt = null;
   try {
+    const sessRes = await fetch('https://api.cobalt.tools/session', {
+      method: 'POST', headers: { 'Accept': 'application/json' }
+    });
+    if (sessRes.ok) { const s = await sessRes.json(); jwt = s.token || null; }
+  } catch {}
+
+  setDetail(jwt ? 'Session ready — fetching link…' : 'Trying download…'); setPct(8);
+
+  // Step 2: try cobalt.tools API (with JWT if we got one)
+  try {
+    const headers = { 'Content-Type': 'application/json', 'Accept': 'application/json' };
+    if (jwt) headers['Authorization'] = `Bearer ${jwt}`;
+
     const res = await fetch('https://api.cobalt.tools/', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      method: 'POST', headers,
       body: JSON.stringify({ url, videoQuality: '720', filenameStyle: 'basic', alwaysProxy: true })
     });
     const data = await res.json();
 
-    if (data.status === 'error' && data.error?.code?.includes('auth')) {
-      // API now requires auth — guide user to web UI instead
-      throw new Error('__COBALT_AUTH__');
+    if (data.status === 'error') {
+      const code = data.error?.code || '';
+      // Auth / rate-limit → fall through to helper
+      if (code.includes('auth') || code.includes('jwt') || code.includes('rate')) throw new Error('__HELPER__');
+      throw new Error(code);
     }
-    if (!res.ok || data.status === 'error') throw new Error(data.error?.code || `HTTP ${res.status}`);
-    if (data.status === 'picker') throw new Error('This URL has multiple videos. Paste a direct video link.');
+    if (data.status === 'picker') throw new Error('This URL has multiple videos — paste a direct video link.');
 
-    const videoURL = data.url;
+    const videoURL = data.url || data.stream;
+    if (!videoURL) throw new Error('No download URL returned.');
+
     setStatus('Downloading video…'); setDetail(''); setPct(12);
     const dlRes = await fetch(videoURL);
-    if (!dlRes.ok) throw new Error('Download failed — try again.');
+    if (!dlRes.ok) throw new Error(`Download failed (${dlRes.status}).`);
+
     const total = parseInt(dlRes.headers.get('content-length') || '0');
     const reader = dlRes.body.getReader();
-    const chunks = [];
-    let received = 0;
+    const chunks = []; let received = 0;
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      chunks.push(value);
-      received += value.length;
+      chunks.push(value); received += value.length;
       if (total) { setPct(12 + (received/total)*28); setDetail(`${(received/1024/1024).toFixed(1)} / ${(total/1024/1024).toFixed(1)} MB`); }
       else { setDetail(`${(received/1024/1024).toFixed(1)} MB…`); }
     }
@@ -304,11 +315,10 @@ async function fetchVideoFromURL(url) {
     return new File([blob], 'video.mp4', { type: blob.type });
 
   } catch(e) {
-    if (e.message === '__COBALT_AUTH__' || e.message?.includes('auth') || e.message?.includes('jwt')) {
-      showCobaltHelper(url);
-      throw new Error('YouTube requires a download step first.\n\ncobalt.tools just opened in a new tab — paste your link there, download the video, then come back and upload it using the Upload File tab.');
-    }
-    throw e;
+    if (e.message !== '__HELPER__' && !e.message?.includes('auth') && !e.message?.includes('jwt')) throw e;
+    // Show in-page helper — no redirect, no new tab
+    showDownloadHelper(url);
+    throw new Error('__SHOW_HELPER__');
   }
 }
 
