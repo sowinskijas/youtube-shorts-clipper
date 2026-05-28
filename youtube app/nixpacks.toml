@@ -1,0 +1,5 @@
+[phases.setup]
+nixPkgs = ["ffmpeg-full", "python311"]
+
+[start]
+cmd = "python app.py"
