@@ -4,9 +4,11 @@ import time
 import queue
 import threading
 from flask import Flask, render_template, request, Response, jsonify, send_from_directory
+from flask_cors import CORS
 from clipper import ClipGenerator
 
 app = Flask(__name__)
+CORS(app, resources={r"/*": {"origins": "*"}})
 
 CLIPS_DIR = os.path.join(os.path.dirname(__file__), 'clips')
 os.makedirs(CLIPS_DIR, exist_ok=True)
