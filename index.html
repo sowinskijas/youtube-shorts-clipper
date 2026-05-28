@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Shorts Clipper</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0e0e10;--surface:#18181b;--surface2:#222226;--border:#2f2f35;
+  --accent:#9147ff;--accent-hover:#772ce8;--text:#efeff1;--muted:#adadb8;
+  --success:#00b87a;--error:#ff4444;--r:10px;
+}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;font-size:15px;line-height:1.5}
+.disclaimer{display:flex;align-items:flex-start;gap:10px;background:#2a2000;border-bottom:1px solid #6b5000;color:#ffd966;padding:12px 20px;font-size:13px}
+.disc-icon{flex-shrink:0;font-size:15px;margin-top:1px}
+main{max-width:680px;margin:0 auto;padding:40px 20px 80px;display:flex;flex-direction:column;gap:20px}
+.hero{text-align:center;padding:20px 0 4px}
+.hero h1{font-size:2rem;font-weight:800;letter-spacing:-.5px}
+.hero .sub{color:var(--muted);margin-top:6px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:24px}
+.hidden{display:none!important}
+/* Drop zone */
+.drop-zone{border:2px dashed var(--border);border-radius:8px;padding:40px 20px;text-align:center;cursor:pointer;transition:border-color .15s,background .15s}
+.drop-zone:hover,.drop-zone.drag-over{border-color:var(--accent);background:#1a1020}
+.drop-icon{font-size:2.5rem;margin-bottom:12px}
+.drop-zone p{color:var(--muted);font-size:14px;margin-top:4px}
+.btn-upload{display:inline-block;margin-top:14px;padding:8px 20px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:14px;cursor:pointer;transition:border-color .15s}
+.btn-upload:hover{border-color:var(--accent)}
+.file-selected{display:flex;align-items:center;gap:10px;padding:12px;background:var(--surface2);border-radius:7px;font-size:13px}
+.file-selected .fname{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:300px}
+.file-selected .fsize{color:var(--muted);flex-shrink:0}
+.file-selected .fclear{margin-left:auto;background:none;border:none;color:var(--muted);cursor:pointer;font-size:18px;line-height:1;padding:0 4px}
+.file-selected .fclear:hover{color:var(--error)}
+/* Form fields */
+.row{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:16px}
+.field{display:flex;flex-direction:column;gap:6px}
+.field label{font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.field input{background:var(--surface2);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:15px;padding:10px 13px;outline:none;transition:border-color .15s;width:100%}
+.field input:focus{border-color:var(--accent)}
+.muted{color:var(--muted)}
+/* Buttons */
+#process-btn{margin-top:20px;width:100%;padding:13px;background:var(--accent);color:#fff;border:none;border-radius:8px;font-size:15px;font-weight:700;cursor:pointer;transition:background .15s,opacity .15s}
+#process-btn:hover:not(:disabled){background:var(--accent-hover)}
+#process-btn:disabled{opacity:.45;cursor:not-allowed}
+.btn-secondary{width:100%;padding:11px;background:transparent;color:var(--muted);border:1px solid var(--border);border-radius:8px;font-size:14px;cursor:pointer;transition:border-color .15s,color .15s;margin-top:10px}
+.btn-secondary:hover{border-color:var(--accent);color:var(--text)}
+.btn-dl-all{width:100%;padding:12px;background:var(--surface2);color:var(--text);border:1px solid var(--accent);border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;transition:background .15s;margin-top:0}
+.btn-dl-all:hover{background:#2a1a4e}
+/* Progress */
+.progress-header{display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap}
+.badge{display:inline-block;padding:2px 9px;border-radius:999px;font-size:11px;font-weight:700;background:var(--surface2);color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.badge.active{background:#2a1a4e;color:var(--accent)}
+.badge.success{background:#0d2e1f;color:var(--success)}
+#progress-status{font-size:14px;color:var(--muted)}
+.progress-track{height:6px;background:var(--surface2);border-radius:3px;overflow:hidden}
+.progress-fill{height:100%;background:var(--accent);border-radius:3px;width:0%;transition:width .3s ease}
+.progress-detail{margin-top:10px;font-size:12px;color:var(--muted);font-family:'SF Mono','Fira Code',monospace;min-height:16px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* Error */
+.error-card{border-color:#4a1a1a;background:#1e0f0f;display:flex;align-items:flex-start;gap:14px}
+.error-icon{flex-shrink:0;width:32px;height:32px;border-radius:50%;background:var(--error);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px}
+.error-card p{color:var(--muted);margin-top:4px;font-size:14px}
+/* Results */
+.results-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px}
+.results-header h2{font-size:1.1rem;font-weight:700}
+.clips-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:16px;margin-bottom:16px}
+.clip-item{background:var(--surface2);border:1px solid var(--border);border-radius:8px;overflow:hidden}
+.clip-item video{width:100%;aspect-ratio:9/16;object-fit:cover;display:block;background:#000}
+.clip-info{padding:10px 12px;display:flex;flex-direction:column;gap:8px}
+.clip-label{font-size:12px;font-weight:600;color:var(--muted)}
+.clip-time{font-size:11px;color:#666;font-family:'SF Mono',monospace}
+.clip-dl{display:block;text-align:center;background:var(--accent);color:#fff;text-decoration:none;border-radius:5px;padding:6px;font-size:12px;font-weight:600;transition:background .15s;cursor:pointer;border:none;width:100%}
+.clip-dl:hover{background:var(--accent-hover)}
+.results-actions{display:flex;flex-direction:column;gap:10px}
+/* Note */
+.note{background:#141420;border:1px solid #2a2a4a;border-radius:8px;padding:14px 16px;font-size:13px;color:var(--muted);line-height:1.6}
+.note strong{color:var(--text)}
+@media(max-width:480px){.row{grid-template-columns:1fr}.clips-grid{grid-template-columns:repeat(2,1fr)}}
+</style>
+</head>
+<body>
+
+<div class="disclaimer">
+  <span class="disc-icon">⚠️</span>
+  <span><strong>Copyright notice:</strong> Only clip content you have the right to use. Clips from streams may contain copyrighted music or game footage — YouTube's Content ID can flag or remove your Shorts.</span>
+</div>
+
+<main>
+  <div class="hero">
+    <h1>🎬 Shorts Clipper</h1>
+    <p class="sub">Upload a VOD → get portrait clips ready to post as Shorts</p>
+  </div>
+
+  <div class="note">
+    <strong>How it works:</strong> Download your streamer VOD using
+    <a href="https://cobalt.tools" target="_blank" style="color:var(--accent)">cobalt.tools</a>
+    or <code style="background:var(--surface2);padding:1px 5px;border-radius:3px">yt-dlp</code>,
+    then upload it here. Everything runs in your browser — no servers, no uploads to the cloud.
+  </div>
+
+  <!-- Upload card -->
+  <div class="card" id="upload-card">
+    <div class="drop-zone" id="drop-zone">
+      <div class="drop-icon">🎥</div>
+      <p>Drag &amp; drop your video here</p>
+      <p>or</p>
+      <label class="btn-upload" for="file-input">Choose File</label>
+      <input type="file" id="file-input" accept="video/*" hidden/>
+    </div>
+
+    <div id="file-selected" class="file-selected hidden">
+      <span class="fname" id="fname"></span>
+      <span class="fsize" id="fsize"></span>
+      <button class="fclear" id="fclear" title="Remove">✕</button>
+    </div>
+
+    <div class="row">
+      <div class="field">
+        <label>Number of clips</label>
+        <input type="number" id="max-clips" value="8" min="1" max="20"/>
+      </div>
+      <div class="field">
+        <label>Clip length <span class="muted">(sec)</span></label>
+        <input type="number" id="clip-duration" value="30" min="10" max="59"/>
+      </div>
+    </div>
+
+    <button id="process-btn" disabled>Select a video first</button>
+  </div>
+
+  <!-- Progress -->
+  <div class="card hidden" id="progress-card">
+    <div class="progress-header">
+      <span class="badge active" id="step-badge">Loading</span>
+      <span id="progress-status">Starting…</span>
+    </div>
+    <div class="progress-track"><div class="progress-fill" id="progress-fill"></div></div>
+    <div class="progress-detail" id="progress-detail"></div>
+  </div>
+
+  <!-- Error -->
+  <div class="card error-card hidden" id="error-card">
+    <div class="error-icon">✖</div>
+    <div><strong>Something went wrong</strong><p id="error-msg"></p></div>
+  </div>
+
+  <!-- Results -->
+  <div class="card hidden" id="results-card">
+    <div class="results-header">
+      <h2>Your Clips</h2>
+      <span class="badge success" id="results-summary"></span>
+    </div>
+    <div class="clips-grid" id="clips-grid"></div>
+    <div class="results-actions">
+      <button class="btn-dl-all" id="dl-all-btn">Download All Clips</button>
+      <button class="btn-secondary" id="start-over-btn">Start Over</button>
+    </div>
+  </div>
+</main>
+
+<script type="module">
+// ── ffmpeg.wasm ──────────────────────────────────────────────────────────────
+let ffmpeg = null;
+
+async function loadFFmpeg(onProgress) {
+  if (ffmpeg) return ffmpeg;
+  const { FFmpeg } = await import('https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/esm/index.js');
+  const { toBlobURL } = await import('https://unpkg.com/@ffmpeg/util@0.12.1/dist/esm/index.js');
+  ffmpeg = new FFmpeg();
+  ffmpeg.on('progress', ({ progress }) => onProgress(Math.round(progress * 100)));
+  const base = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
+  setDetail('Downloading video engine (~30 MB, one-time)…');
+  await ffmpeg.load({
+    coreURL:  await toBlobURL(`${base}/ffmpeg-core.js`,   'text/javascript'),
+    wasmURL:  await toBlobURL(`${base}/ffmpeg-core.wasm`, 'application/wasm'),
+  });
+  return ffmpeg;
+}
+
+// ── Audio analysis ───────────────────────────────────────────────────────────
+function findPeaks(arr, minDist, threshold) {
+  const peaks = [];
+  for (let i = 1; i < arr.length - 1; i++) {
+    if (arr[i] < threshold) continue;
+    if (arr[i] <= arr[i-1] || arr[i] <= arr[i+1]) continue;
+    if (peaks.length && i - peaks[peaks.length-1] < minDist) {
+      if (arr[i] > arr[peaks[peaks.length-1]]) peaks[peaks.length-1] = i;
+    } else peaks.push(i);
+  }
+  return peaks;
+}
+
+async function analyzeAudio(file, duration, maxClips, clipDuration) {
+  try {
+    setStep('audio'); setStatus('Analyzing audio…'); setPct(52);
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const buf = await ctx.decodeAudioData(await file.arrayBuffer());
+    const data = buf.getChannelData(0);
+    const sr = buf.sampleRate;
+    const winSz = Math.floor(sr * 0.5);
+    const hopSz = Math.floor(sr * 0.25);
+    const energies = [], times = [];
+    for (let i = 0; i < data.length - winSz; i += hopSz) {
+      let s = 0;
+      for (let j = 0; j < winSz; j++) s += data[i+j] ** 2;
+      energies.push(Math.sqrt(s / winSz));
+      times.push(i / sr);
+    }
+    const k = Math.min(20, Math.floor(energies.length / 4) || 1);
+    const smoothed = energies.map((_, i) => {
+      const sl = energies.slice(Math.max(0,i-k), Math.min(energies.length,i+k));
+      return sl.reduce((a,b)=>a+b,0)/sl.length;
+    });
+    const mean = smoothed.reduce((a,b)=>a+b,0)/smoothed.length;
+    const std  = Math.sqrt(smoothed.reduce((a,b)=>a+(b-mean)**2,0)/smoothed.length);
+    const thresh = mean + 0.3 * std;
+    const minDist = Math.floor(clipDuration / 0.25);
+    const peaks = findPeaks(smoothed, minDist, thresh)
+      .sort((a,b) => smoothed[b] - smoothed[a]);
+    const leadIn = 5, used = [];
+    for (const p of peaks) {
+      let start = Math.max(0, times[p] - leadIn);
+      if (start + clipDuration > duration) start = Math.max(0, duration - clipDuration);
+      if (!used.some(s => Math.abs(start-s) < clipDuration*0.75)) used.push(start);
+      if (used.length >= maxClips) break;
+    }
+    return used.length ? used.sort((a,b)=>a-b) : null;
+  } catch { return null; }
+}
+
+function evenSpacing(duration, maxClips, clipDuration) {
+  const step = duration / (maxClips + 1);
+  return Array.from({length: maxClips}, (_,i) => step*(i+1))
+    .filter(t => t + clipDuration <= duration);
+}
+
+// ── Clip generation ──────────────────────────────────────────────────────────
+async function generateClips(file, timestamps, clipDuration, onClip) {
+  const ff = ffmpeg;
+  // Write source file to ffmpeg FS
+  setDetail('Writing video to memory…');
+  const src = new Uint8Array(await file.arrayBuffer());
+  await ff.writeFile('input.mp4', src);
+
+  // Get video dimensions via HTML video element
+  const { w, h, dur } = await getVideoInfo(file);
+
+  // Crop params (16:9 → 9:16 center crop)
+  const targetRatio = 9/16;
+  let cropW, cropH, cropX, cropY;
+  if (w/h > targetRatio) {
+    cropH = h; cropW = Math.floor(h * targetRatio) & ~1;
+    cropX = Math.floor((w - cropW) / 2); cropY = 0;
+  } else {
+    cropW = w; cropH = Math.floor(w / targetRatio) & ~1;
+    cropX = 0; cropY = Math.floor((h - cropH) / 2);
+  }
+
+  const clips = [];
+  for (let i = 0; i < timestamps.length; i++) {
+    const ts = timestamps[i];
+    const outName = `clip_${String(i+1).padStart(3,'0')}.mp4`;
+    setStep('clip');
+    setStatus(`Creating clip ${i+1} of ${timestamps.length}…`);
+    setPct(65 + (i / timestamps.length) * 32);
+    setDetail(`@ ${fmtTime(ts)}`);
+
+    await ff.exec([
+      '-ss', String(ts),
+      '-i', 'input.mp4',
+      '-t', String(clipDuration),
+      '-vf', `crop=${cropW}:${cropH}:${cropX}:${cropY},scale=1080:1920`,
+      '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '26',
+      '-c:a', 'aac', '-b:a', '128k',
+      '-movflags', '+faststart',
+      '-y', outName
+    ]);
+
+    const data = await ff.readFile(outName);
+    const blob = new Blob([data.buffer], {type:'video/mp4'});
+    clips.push({ blob, ts, index: i+1 });
+    onClip(clips.length, timestamps.length);
+    await ff.deleteFile(outName);
+  }
+  await ff.deleteFile('input.mp4');
+  return clips;
+}
+
+function getVideoInfo(file) {
+  return new Promise((resolve, reject) => {
+    const v = document.createElement('video');
+    v.preload = 'metadata';
+    v.src = URL.createObjectURL(file);
+    v.onloadedmetadata = () => {
+      resolve({ w: v.videoWidth, h: v.videoHeight, dur: v.duration });
+      URL.revokeObjectURL(v.src);
+    };
+    v.onerror = reject;
+  });
+}
+
+function fmtTime(s) {
+  const h=Math.floor(s/3600), m=Math.floor((s%3600)/60), sec=Math.floor(s%60);
+  if (h) return `${h}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
+  return `${m}:${String(sec).padStart(2,'0')}`;
+}
+
+// ── UI helpers ───────────────────────────────────────────────────────────────
+const $  = id => document.getElementById(id);
+const setStep   = s => { $('step-badge').textContent = s; };
+const setStatus = s => { $('progress-status').textContent = s; };
+const setDetail = s => { $('progress-detail').textContent = s; };
+const setPct    = p => { $('progress-fill').style.width = Math.min(100,p)+'%'; };
+const showErr   = msg => {
+  $('error-msg').textContent = msg;
+  $('error-card').classList.remove('hidden');
+  $('progress-card').classList.add('hidden');
+};
+
+// ── File handling ─────────────────────────────────────────────────────────────
+let selectedFile = null;
+let generatedClips = [];
+
+function setFile(f) {
+  if (!f || !f.type.startsWith('video/')) { alert('Please select a video file.'); return; }
+  selectedFile = f;
+  $('drop-zone').classList.add('hidden');
+  $('file-selected').classList.remove('hidden');
+  $('fname').textContent = f.name;
+  $('fsize').textContent = (f.size / 1024 / 1024).toFixed(1) + ' MB';
+  $('process-btn').disabled = false;
+  $('process-btn').textContent = 'Generate Clips';
+}
+
+$('file-input').addEventListener('change', e => setFile(e.target.files[0]));
+$('fclear').addEventListener('click', () => {
+  selectedFile = null;
+  $('file-input').value = '';
+  $('file-selected').classList.add('hidden');
+  $('drop-zone').classList.remove('hidden');
+  $('process-btn').disabled = true;
+  $('process-btn').textContent = 'Select a video first';
+});
+
+const dz = $('drop-zone');
+dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag-over'); });
+dz.addEventListener('dragleave', () => dz.classList.remove('drag-over'));
+dz.addEventListener('drop', e => { e.preventDefault(); dz.classList.remove('drag-over'); setFile(e.dataTransfer.files[0]); });
+dz.addEventListener('click', () => $('file-input').click());
+
+// ── Main process ─────────────────────────────────────────────────────────────
+$('process-btn').addEventListener('click', async () => {
+  if (!selectedFile) return;
+  const maxClips     = Math.max(1, Math.min(20, +$('max-clips').value    || 8));
+  const clipDuration = Math.max(10, Math.min(59, +$('clip-duration').value || 30));
+
+  $('upload-card').classList.add('hidden');
+  $('error-card').classList.add('hidden');
+  $('results-card').classList.add('hidden');
+  $('progress-card').classList.remove('hidden');
+  setPct(2); setStep('Loading'); setStatus('Loading video engine…'); setDetail('');
+
+  try {
+    // Load ffmpeg
+    await loadFFmpeg(p => { setPct(2 + p*0.45); setDetail(`Downloading engine… ${p}%`); });
+    setPct(50); setStep('Analyze'); setStatus('Reading video…'); setDetail('');
+
+    // Get duration
+    const { dur } = await getVideoInfo(selectedFile);
+    if (!dur) throw new Error('Could not read video duration. Try a different file.');
+    setDetail(`Duration: ${fmtTime(dur)}`);
+
+    // Audio analysis
+    let timestamps = await analyzeAudio(selectedFile, dur, maxClips, clipDuration);
+    if (!timestamps) {
+      setDetail('Audio analysis failed — using even spacing');
+      timestamps = evenSpacing(dur, maxClips, clipDuration);
+    }
+    if (!timestamps.length) throw new Error('Video is too short for the selected clip duration.');
+
+    setStatus(`Found ${timestamps.length} moments`);
+    setPct(65);
+
+    // Generate clips
+    generatedClips = await generateClips(selectedFile, timestamps, clipDuration, (done, total) => {
+      setPct(65 + (done/total)*32);
+    });
+
+    // Show results
+    setPct(100); setStatus('Done!');
+    setTimeout(() => showResults(), 400);
+
+  } catch(e) {
+    showErr(e.message || String(e));
+  }
+});
+
+function showResults() {
+  $('progress-card').classList.add('hidden');
+  $('error-card').classList.add('hidden');
+  $('results-card').classList.remove('hidden');
+  $('results-summary').textContent = `${generatedClips.length} clip${generatedClips.length!==1?'s':''}`;
+
+  const grid = $('clips-grid');
+  grid.innerHTML = '';
+  generatedClips.forEach(clip => {
+    const url = URL.createObjectURL(clip.blob);
+    const div = document.createElement('div');
+    div.className = 'clip-item';
+    div.innerHTML = `
+      <video src="${url}" controls playsinline muted loop preload="metadata"></video>
+      <div class="clip-info">
+        <span class="clip-label">Clip ${clip.index}</span>
+        <span class="clip-time">@ ${fmtTime(clip.ts)}</span>
+        <button class="clip-dl" data-idx="${clip.index-1}">Download</button>
+      </div>`;
+    grid.appendChild(div);
+  });
+
+  grid.querySelectorAll('.clip-dl').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const c = generatedClips[+btn.dataset.idx];
+      const a = Object.assign(document.createElement('a'), {href: URL.createObjectURL(c.blob), download: `clip_${c.index}.mp4`});
+      a.click();
+    });
+  });
+}
+
+$('dl-all-btn').addEventListener('click', () => {
+  generatedClips.forEach((c,i) => setTimeout(() => {
+    const a = Object.assign(document.createElement('a'), {href: URL.createObjectURL(c.blob), download: `clip_${c.index}.mp4`});
+    a.click();
+  }, i*300));
+});
+
+$('start-over-btn').addEventListener('click', () => {
+  generatedClips = []; selectedFile = null;
+  $('file-input').value = '';
+  $('results-card').classList.add('hidden');
+  $('error-card').classList.add('hidden');
+  $('progress-card').classList.add('hidden');
+  $('file-selected').classList.add('hidden');
+  $('drop-zone').classList.remove('hidden');
+  $('upload-card').classList.remove('hidden');
+  $('process-btn').disabled = true;
+  $('process-btn').textContent = 'Select a video first';
+  setPct(0);
+});
+</script>
+</body>
+</html>
