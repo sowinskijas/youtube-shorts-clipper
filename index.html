@@ -341,55 +341,61 @@ function generateViaBackend(url, maxClips, clipDuration) {
       const jobId = data.job_id;
       setDetail(`Job ${jobId} started`);
 
-      const es = new EventSource(`${backendURL}/progress/${jobId}`);
+      // Use fetch-based SSE so we can include the tunnel bypass header
+      const sseRes = await fetch(`${backendURL}/progress/${jobId}`, {
+        headers: { 'Accept': 'text/event-stream', ...TUNNEL_HEADERS }
+      });
+      if (!sseRes.ok) { reject(new Error(`Progress stream error (${sseRes.status})`)); return; }
 
-      es.onmessage = (e) => {
-        let msg;
-        try { msg = JSON.parse(e.data); } catch { return; }
+      const reader = sseRes.body.getReader();
+      const dec = new TextDecoder();
+      let buf = '';
 
+      const handleMsg = (msg) => {
         if (msg.type === 'ping') return;
-
         if (msg.type === 'status') {
           const stepMap = { download:'Download', analyze:'Analyze', audio:'Audio', detect:'Detect', clip:'Clip' };
           setStep(stepMap[msg.step] || msg.step || 'Process');
           setStatus(msg.message || '');
         }
-
         if (msg.type === 'download_progress') {
           setPct(5 + (msg.percent || 0) * 0.35);
           setDetail(msg.message || '');
         }
-
         if (msg.type === 'info') {
           setDetail(`Duration: ${fmtTime(msg.duration)} · ${msg.width}×${msg.height}`);
           setPct(42);
         }
-
         if (msg.type === 'progress') {
-          const pct = 55 + (msg.current / Math.max(msg.total,1)) * 42;
-          setPct(pct);
-          setStep('Clip');
-          setStatus(`Clip ${msg.current} of ${msg.total}…`);
+          setPct(55 + (msg.current / Math.max(msg.total,1)) * 42);
+          setStep('Clip'); setStatus(`Clip ${msg.current} of ${msg.total}…`);
         }
-
         if (msg.type === 'done') {
-          es.close();
           const clips = (msg.clips || []).map(c => ({
             url: `${backendURL}/clips/${c.path}`,
-            ts: c.timestamp || 0,
-            index: c.index
+            ts: c.timestamp || 0, index: c.index
           }));
           if (!clips.length) { reject(new Error('Backend returned no clips.')); return; }
           resolve(clips);
         }
-
-        if (msg.type === 'error') {
-          es.close();
-          reject(new Error(msg.message || 'Backend error'));
-        }
+        if (msg.type === 'error') reject(new Error(msg.message || 'Backend error'));
       };
 
-      es.onerror = () => { es.close(); reject(new Error('Lost connection to backend — is the tunnel still running?')); };
+      (async () => {
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buf += dec.decode(value, { stream: true });
+            const lines = buf.split('\n');
+            buf = lines.pop();
+            for (const line of lines) {
+              if (!line.startsWith('data: ')) continue;
+              try { handleMsg(JSON.parse(line.slice(6))); } catch {}
+            }
+          }
+        } catch(e) { reject(new Error('Lost connection to backend — is the tunnel still running?')); }
+      })();
     })
     .catch(reject);
   });
