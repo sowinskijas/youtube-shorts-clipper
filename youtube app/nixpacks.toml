@@ -2,4 +2,4 @@
 nixPkgs = ["ffmpeg-full", "python311"]
 
 [start]
-cmd = "python app.py"
+cmd = "gunicorn app:app --worker-class gevent --workers 2 --bind 0.0.0.0:$PORT --timeout 300 --keep-alive 75"
