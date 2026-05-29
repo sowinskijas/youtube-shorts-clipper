@@ -229,15 +229,23 @@ function switchTab(t) {
 }
 
 // ── Backend URL (Advanced section) ───────────────────────────────────────────
+// Default tunnel URL — change this if you re-deploy to a new address
+const DEFAULT_BACKEND = 'https://shorts-clipper-sowinskijas.loca.lt';
+
 const backendInput = $('backend-url-input');
-backendInput.value = localStorage.getItem('backendURL') || '';
+// Pre-fill with default on first visit
+if (!localStorage.getItem('backendURL')) {
+  localStorage.setItem('backendURL', DEFAULT_BACKEND);
+}
+backendInput.value = localStorage.getItem('backendURL');
+
 backendInput.addEventListener('input', () => {
   localStorage.setItem('backendURL', backendInput.value.trim());
   updateBackendStatus();
 });
 $('adv-toggle').addEventListener('click', () => {
   $('adv-section').classList.toggle('hidden');
-  updateBackendStatus();
+  if (!$('adv-section').classList.contains('hidden')) updateBackendStatus();
 });
 
 function getBackendURL() {
@@ -247,30 +255,33 @@ function getBackendURL() {
 async function updateBackendStatus() {
   const url = getBackendURL();
   const statusEl = $('backend-status');
-  if (!url) { statusEl.style.display = 'none'; return; }
+  const hintEl   = $('url-hint');
+  if (!url) { statusEl.style.display = 'none'; return false; }
   statusEl.style.display = 'block';
   statusEl.style.color = '#888';
   statusEl.textContent = '⏳ Checking connection…';
   try {
-    const res = await fetch(`${url}/`, { method: 'GET', signal: AbortSignal.timeout(4000) });
+    const res = await fetch(`${url}/`, { method: 'GET', signal: AbortSignal.timeout(5000) });
     if (res.ok || res.status === 405) {
       statusEl.style.color = 'var(--success)';
       statusEl.textContent = '✓ Backend reachable';
-    } else {
-      throw new Error(`HTTP ${res.status}`);
+      hintEl.textContent = '✓ Backend ready — paste a YouTube link and click Generate.';
+      hintEl.style.color = 'var(--success)';
+      return true;
     }
+    throw new Error(`HTTP ${res.status}`);
   } catch {
     statusEl.style.color = 'var(--error)';
-    statusEl.textContent = '✗ Cannot reach backend — is the tunnel running?';
+    statusEl.textContent = '✗ Cannot reach backend — run the local server + tunnel first.';
+    hintEl.textContent = 'Paste a link and click Generate — we\'ll try to fetch it automatically.';
+    hintEl.style.color = '';
+    return false;
   }
 }
-// Check on load if a URL is already stored
-if (getBackendURL()) {
-  $('adv-section').classList.remove('hidden');
-  updateBackendStatus();
-  $('url-hint').textContent = '✓ Backend configured — clips will be generated server-side.';
-  $('url-hint').style.color = 'var(--success)';
-}
+
+// On load: always show Advanced section and check backend status
+$('adv-section').classList.remove('hidden');
+updateBackendStatus();
 
 // ── File handling ─────────────────────────────────────────────────────────────
 let selectedFile = null;
