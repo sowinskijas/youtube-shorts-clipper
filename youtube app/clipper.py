@@ -132,8 +132,9 @@ class ClipGenerator:
         cmd = [
             YT_DLP, '-m', 'yt_dlp',
             '--format',
-            'bestvideo[height<=720]+bestaudio/best[height<=720]/best',
+            'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/22/18/best[height<=720]/best',
             '--merge-output-format', 'mp4',
+            '--extractor-args', 'youtube:player_client=ios,web_creator,web',
             '--output', video_path,
             '--no-playlist',
             '--no-part',
