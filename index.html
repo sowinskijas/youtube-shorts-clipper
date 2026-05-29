@@ -228,6 +228,50 @@ function switchTab(t) {
   });
 }
 
+// ── Backend URL (Advanced section) ───────────────────────────────────────────
+const backendInput = $('backend-url-input');
+backendInput.value = localStorage.getItem('backendURL') || '';
+backendInput.addEventListener('input', () => {
+  localStorage.setItem('backendURL', backendInput.value.trim());
+  updateBackendStatus();
+});
+$('adv-toggle').addEventListener('click', () => {
+  $('adv-section').classList.toggle('hidden');
+  updateBackendStatus();
+});
+
+function getBackendURL() {
+  return (localStorage.getItem('backendURL') || '').trim().replace(/\/$/, '');
+}
+
+async function updateBackendStatus() {
+  const url = getBackendURL();
+  const statusEl = $('backend-status');
+  if (!url) { statusEl.style.display = 'none'; return; }
+  statusEl.style.display = 'block';
+  statusEl.style.color = '#888';
+  statusEl.textContent = '⏳ Checking connection…';
+  try {
+    const res = await fetch(`${url}/`, { method: 'GET', signal: AbortSignal.timeout(4000) });
+    if (res.ok || res.status === 405) {
+      statusEl.style.color = 'var(--success)';
+      statusEl.textContent = '✓ Backend reachable';
+    } else {
+      throw new Error(`HTTP ${res.status}`);
+    }
+  } catch {
+    statusEl.style.color = 'var(--error)';
+    statusEl.textContent = '✗ Cannot reach backend — is the tunnel running?';
+  }
+}
+// Check on load if a URL is already stored
+if (getBackendURL()) {
+  $('adv-section').classList.remove('hidden');
+  updateBackendStatus();
+  $('url-hint').textContent = '✓ Backend configured — clips will be generated server-side.';
+  $('url-hint').style.color = 'var(--success)';
+}
+
 // ── File handling ─────────────────────────────────────────────────────────────
 let selectedFile = null;
 function setFile(f) {
@@ -265,11 +309,81 @@ async function loadFFmpeg() {
   });
 }
 
-// ── video download ────────────────────────────────────────────────────────────
+// ── Backend clip generation via SSE ──────────────────────────────────────────
+function generateViaBackend(url, maxClips, clipDuration) {
+  const backendURL = getBackendURL();
+  return new Promise((resolve, reject) => {
+    setStep('Connect'); setStatus('Connecting to backend…'); setDetail(''); setPct(3);
+
+    fetch(`${backendURL}/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url, max_clips: maxClips, clip_duration: clipDuration })
+    })
+    .then(res => { if (!res.ok) throw new Error(`Backend error (${res.status})`); return res.json(); })
+    .then(data => {
+      if (data.error) { reject(new Error(data.error)); return; }
+      const jobId = data.job_id;
+      setDetail(`Job ${jobId} started`);
+
+      const es = new EventSource(`${backendURL}/progress/${jobId}`);
+
+      es.onmessage = (e) => {
+        let msg;
+        try { msg = JSON.parse(e.data); } catch { return; }
+
+        if (msg.type === 'ping') return;
+
+        if (msg.type === 'status') {
+          const stepMap = { download:'Download', analyze:'Analyze', audio:'Audio', detect:'Detect', clip:'Clip' };
+          setStep(stepMap[msg.step] || msg.step || 'Process');
+          setStatus(msg.message || '');
+        }
+
+        if (msg.type === 'download_progress') {
+          setPct(5 + (msg.percent || 0) * 0.35);
+          setDetail(msg.message || '');
+        }
+
+        if (msg.type === 'info') {
+          setDetail(`Duration: ${fmtTime(msg.duration)} · ${msg.width}×${msg.height}`);
+          setPct(42);
+        }
+
+        if (msg.type === 'progress') {
+          const pct = 55 + (msg.current / Math.max(msg.total,1)) * 42;
+          setPct(pct);
+          setStep('Clip');
+          setStatus(`Clip ${msg.current} of ${msg.total}…`);
+        }
+
+        if (msg.type === 'done') {
+          es.close();
+          const clips = (msg.clips || []).map(c => ({
+            url: `${backendURL}/clips/${c.path}`,
+            ts: c.timestamp || 0,
+            index: c.index
+          }));
+          if (!clips.length) { reject(new Error('Backend returned no clips.')); return; }
+          resolve(clips);
+        }
+
+        if (msg.type === 'error') {
+          es.close();
+          reject(new Error(msg.message || 'Backend error'));
+        }
+      };
+
+      es.onerror = () => { es.close(); reject(new Error('Lost connection to backend — is the tunnel still running?')); };
+    })
+    .catch(reject);
+  });
+}
+
+// ── video download (client-side fallback) ─────────────────────────────────────
 function showDownloadHelper(url) {
   $('url-hint').classList.add('hidden');
   $('cobalt-link').href = `https://cobalt.tools/`;
-  // Copy URL so user can paste it into cobalt.tools easily
   navigator.clipboard?.writeText(url).catch(()=>{});
   $('url-helper').classList.remove('hidden');
 }
@@ -277,7 +391,6 @@ function showDownloadHelper(url) {
 async function fetchVideoFromURL(url) {
   setStep('Download'); setStatus('Fetching video…'); setDetail('Connecting…'); setPct(5);
 
-  // Step 1: try to get a guest session token
   let jwt = null;
   try {
     const sessRes = await fetch('https://api.cobalt.tools/session', {
@@ -288,7 +401,6 @@ async function fetchVideoFromURL(url) {
 
   setDetail(jwt ? 'Session ready — fetching link…' : 'Trying download…'); setPct(8);
 
-  // Step 2: try cobalt.tools API (with JWT if we got one)
   try {
     const headers = { 'Content-Type': 'application/json', 'Accept': 'application/json' };
     if (jwt) headers['Authorization'] = `Bearer ${jwt}`;
@@ -301,7 +413,6 @@ async function fetchVideoFromURL(url) {
 
     if (data.status === 'error') {
       const code = data.error?.code || '';
-      // Auth / rate-limit → fall through to helper
       if (code.includes('auth') || code.includes('jwt') || code.includes('rate')) throw new Error('__HELPER__');
       throw new Error(code);
     }
@@ -329,7 +440,6 @@ async function fetchVideoFromURL(url) {
 
   } catch(e) {
     if (e.message !== '__HELPER__' && !e.message?.includes('auth') && !e.message?.includes('jwt')) throw e;
-    // Show in-page helper — no redirect, no new tab
     showDownloadHelper(url);
     throw new Error('__SHOW_HELPER__');
   }
@@ -379,7 +489,7 @@ function evenSpacing(duration, maxClips, clipDuration) {
   return Array.from({length:maxClips},(_,i)=>step*(i+1)).filter(t=>t+clipDuration<=duration);
 }
 
-// ── Clip generation ───────────────────────────────────────────────────────────
+// ── Clip generation (client-side ffmpeg.wasm) ─────────────────────────────────
 function getVideoInfo(file) {
   return new Promise((res,rej)=>{
     const v=document.createElement('video'); v.preload='metadata';
@@ -388,7 +498,6 @@ function getVideoInfo(file) {
     const done=(dur)=>{ if(resolved)return; resolved=true; URL.revokeObjectURL(v.src); res({w:v.videoWidth||1280,h:v.videoHeight||720,dur}); };
     v.onloadedmetadata=()=>{
       if(isFinite(v.duration)&&v.duration>0){ done(v.duration); return; }
-      // MediaRecorder WebM: duration is Infinity — seek to end to force it
       v.currentTime=1e9;
     };
     v.ontimeupdate=()=>{ if(!isFinite(v.duration)||v.duration<=0) return; done(v.duration); };
@@ -426,6 +535,21 @@ async function generateClips(file, timestamps, clipDuration) {
   return clips;
 }
 
+async function processFileClips(file, maxClips, clipDuration) {
+  const {dur} = await getVideoInfo(file);
+  if (!dur) throw new Error('Could not read video duration.');
+  setDetail(`Duration: ${fmtTime(dur)}`);
+
+  let timestamps = await analyzeAudio(file, dur, maxClips, clipDuration);
+  if (!timestamps) { setDetail('Using even spacing (audio flat)'); timestamps = evenSpacing(dur, maxClips, clipDuration); }
+  if (!timestamps.length) throw new Error('Video is too short for the selected clip duration.');
+  setStatus(`Found ${timestamps.length} moments to clip`); setPct(53);
+
+  generatedClips = await generateClips(file, timestamps, clipDuration);
+  setPct(100); setStatus('Done!');
+  setTimeout(showResults, 400);
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 let generatedClips = [];
 
@@ -440,28 +564,24 @@ $('process-btn').addEventListener('click', async () => {
   setPct(2); setStep('Start'); setStatus('Starting…'); setDetail('');
 
   try {
-    let file;
     if (activeTab === 'url') {
       const url = $('url-input').value.trim();
       if (!url) throw new Error('Please paste a YouTube or Twitch URL.');
-      file = await fetchVideoFromURL(url);
+      const backendURL = getBackendURL();
+      if (backendURL) {
+        // ── Backend path: server downloads + clips
+        generatedClips = await generateViaBackend(url, maxClips, clipDuration);
+        setPct(100); setStatus('Done!');
+        setTimeout(showResults, 400);
+      } else {
+        // ── Client-side path: download then ffmpeg.wasm
+        const file = await fetchVideoFromURL(url);
+        await processFileClips(file, maxClips, clipDuration);
+      }
     } else {
       if (!selectedFile) throw new Error('Please select a video file.');
-      file = selectedFile;
+      await processFileClips(selectedFile, maxClips, clipDuration);
     }
-
-    const {dur} = await getVideoInfo(file);
-    if (!dur) throw new Error('Could not read video duration.');
-    setDetail(`Duration: ${fmtTime(dur)}`);
-
-    let timestamps = await analyzeAudio(file, dur, maxClips, clipDuration);
-    if (!timestamps) { setDetail('Using even spacing (audio flat)'); timestamps = evenSpacing(dur, maxClips, clipDuration); }
-    if (!timestamps.length) throw new Error('Video is too short for the selected clip duration.');
-    setStatus(`Found ${timestamps.length} moments to clip`); setPct(53);
-
-    generatedClips = await generateClips(file, timestamps, clipDuration);
-    setPct(100); setStatus('Done!');
-    setTimeout(showResults, 400);
   } catch(e) {
     if (e.message !== '__SHOW_HELPER__') showErr(e.message || String(e));
     $('progress-card').classList.add('hidden');
@@ -475,9 +595,10 @@ function showResults() {
   $('results-summary').textContent = `${generatedClips.length} clip${generatedClips.length!==1?'s':''}`;
   const grid = $('clips-grid'); grid.innerHTML='';
   generatedClips.forEach(clip => {
-    const url=URL.createObjectURL(clip.blob), div=document.createElement('div');
+    const videoURL = clip.url || URL.createObjectURL(clip.blob);
+    const div = document.createElement('div');
     div.className='clip-item';
-    div.innerHTML=`<video src="${url}" controls playsinline muted loop preload="metadata"></video>
+    div.innerHTML=`<video src="${videoURL}" controls playsinline muted loop preload="metadata"></video>
       <div class="clip-info">
         <span class="clip-label">Clip ${clip.index}</span>
         <span class="clip-time">@ ${fmtTime(clip.ts)}</span>
@@ -486,15 +607,17 @@ function showResults() {
     grid.appendChild(div);
   });
   grid.querySelectorAll('.clip-dl').forEach(btn=>btn.addEventListener('click',()=>{
-    const c=generatedClips[+btn.dataset.idx];
-    Object.assign(document.createElement('a'),{href:URL.createObjectURL(c.blob),download:`clip_${c.index}.mp4`}).click();
+    const c = generatedClips[+btn.dataset.idx];
+    const href = c.url || URL.createObjectURL(c.blob);
+    Object.assign(document.createElement('a'),{href, download:`clip_${c.index}.mp4`}).click();
   }));
 }
 
-$('dl-all-btn').addEventListener('click', ()=>
-  generatedClips.forEach((c,i)=>setTimeout(()=>
-    Object.assign(document.createElement('a'),{href:URL.createObjectURL(c.blob),download:`clip_${c.index}.mp4`}).click()
-  ,i*300))
+$('dl-all-btn').addEventListener('click', () =>
+  generatedClips.forEach((c,i) => setTimeout(() => {
+    const href = c.url || URL.createObjectURL(c.blob);
+    Object.assign(document.createElement('a'),{href, download:`clip_${c.index}.mp4`}).click();
+  }, i*300))
 );
 
 $('start-over-btn').addEventListener('click', ()=>{
