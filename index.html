@@ -139,7 +139,7 @@ main{max-width:680px;margin:0 auto;padding:40px 20px 80px;display:flex;flex-dire
           <div id="backend-status" style="margin-top:6px;font-size:11px;display:none"></div>
           <p style="font-size:11px;color:var(--muted);margin-top:6px;line-height:1.5">
             Keep the local Flask server running: <code style="background:#111;padding:1px 5px;border-radius:3px">cd "youtube app" &amp;&amp; python app.py</code><br>
-            Keep the tunnel running: <code style="background:#111;padding:1px 5px;border-radius:3px">npx localtunnel --port 5050 --subdomain shorts-clipper-sowinskijas</code>
+            Keep the tunnel running: <code style="background:#111;padding:1px 5px;border-radius:3px">ssh -R 80:localhost:5050 serveo.net</code> (paste the URL it gives you above)
           </p>
         </div>
       </div>
