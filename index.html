@@ -332,7 +332,7 @@ function generateViaBackend(url, maxClips, clipDuration) {
 
     fetch(`${backendURL}/generate`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...TUNNEL_HEADERS },
       body: JSON.stringify({ url, max_clips: maxClips, clip_duration: clipDuration })
     })
     .then(res => { if (!res.ok) throw new Error(`Backend error (${res.status})`); return res.json(); })
