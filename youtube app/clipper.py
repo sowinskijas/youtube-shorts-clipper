@@ -134,7 +134,7 @@ class ClipGenerator:
             '--format',
             'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/22/18/best[height<=720]/best',
             '--merge-output-format', 'mp4',
-            '--extractor-args', 'youtube:player_client=ios,web_creator,web',
+            '--extractor-args', 'youtube:player_client=android',
             '--output', video_path,
             '--no-playlist',
             '--no-part',
