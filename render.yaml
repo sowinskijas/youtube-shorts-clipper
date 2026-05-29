@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: shorts-clipper-backend
+    env: docker
+    dockerfilePath: ./youtube app/Dockerfile
+    dockerContext: ./youtube app
+    plan: free
+    envVars:
+      - key: PORT
+        value: 8080
