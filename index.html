@@ -130,16 +130,17 @@ main{max-width:680px;margin:0 auto;padding:40px 20px 80px;display:flex;flex-dire
         Paste a link and click Generate — we'll try to fetch it automatically.
       </p>
       <div style="margin-top:10px">
-        <button id="adv-toggle" style="background:none;border:none;color:#666;font-size:11px;cursor:pointer;padding:0;letter-spacing:.03em">⚙ Advanced</button>
-        <div id="adv-section" class="hidden" style="margin-top:8px;padding:12px;background:var(--surface2);border-radius:7px;border:1px solid var(--border)">
+        <button id="adv-toggle" style="background:none;border:none;color:#666;font-size:11px;cursor:pointer;padding:0;letter-spacing:.03em">⚙ Backend settings</button>
+        <div id="adv-section" style="margin-top:8px;padding:12px;background:var(--surface2);border-radius:7px;border:1px solid var(--border)">
           <div class="field">
-            <label>Backend URL <span class="muted">(optional)</span></label>
-            <input type="url" id="backend-url-input" class="url-input" placeholder="https://xxxx.serveousercontent.com" style="font-size:13px;padding:8px 12px"/>
+            <label>Local backend URL</label>
+            <input type="url" id="backend-url-input" class="url-input" placeholder="https://shorts-clipper-sowinskijas.loca.lt" style="font-size:13px;padding:8px 12px"/>
           </div>
+          <div id="backend-status" style="margin-top:6px;font-size:11px;display:none"></div>
           <p style="font-size:11px;color:var(--muted);margin-top:6px;line-height:1.5">
-            Run the local Flask server, expose it with <code style="background:#111;padding:1px 5px;border-radius:3px">ssh -R 80:localhost:5050 serveo.net</code>, then paste the tunnel URL above to enable real YouTube downloads.
+            Keep the local Flask server running: <code style="background:#111;padding:1px 5px;border-radius:3px">cd "youtube app" &amp;&amp; python app.py</code><br>
+            Keep the tunnel running: <code style="background:#111;padding:1px 5px;border-radius:3px">npx localtunnel --port 5050 --subdomain shorts-clipper-sowinskijas</code>
           </p>
-          <div id="backend-status" style="margin-top:8px;font-size:11px;display:none"></div>
         </div>
       </div>
     </div>
